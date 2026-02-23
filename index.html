@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Realistic 2D Driving Simulator</title>
+<style>
+    /* ==========================================
+       CSS STYLING & LAYOUT
+       ========================================== */
+    
+    body { 
+        margin: 0; 
+        overflow: hidden; 
+        background: #1a1a1a; 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    canvas { 
+        display: block; 
+    }
+    
+    #ui-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none; 
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 20px;
+        box-sizing: border-box;
+    }
+
+    .top-left-ui {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        pointer-events: auto; 
+    }
+
+    .panel {
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 8px;
+        width: fit-content;
+        border: 1px solid #444;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .panel h2 { margin: 0 0 10px 0; font-size: 1.2rem; text-transform: uppercase; color: #4dabf7; }
+    .panel p { margin: 5px 0; font-size: 0.9rem; }
+    .key { 
+        display: inline-block; 
+        background: #333; 
+        padding: 2px 8px; 
+        border-radius: 4px; 
+        border: 1px solid #555; 
+        font-weight: bold;
+        color: #fff;
+    }
+
+    .vehicle-selector button {
+        background: #333;
+        color: white;
+        border: 2px solid #555;
+        padding: 8px 12px;
+        margin-right: 5px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: bold;
+        transition: 0.2s;
+    }
+    .vehicle-selector button:hover { background: #444; }
+    .vehicle-selector button.active {
+        background: #4dabf7;
+        color: #000;
+        border-color: #3bc9db;
+    }
+
+    .dashboard {
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 20px 30px;
+        border-radius: 12px;
+        align-self: flex-end;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        border: 1px solid #444;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+
+    .steering-container {
+        width: 70px; 
+        height: 70px;
+        background: #222;
+        border-radius: 50%;
+        display: flex; 
+        justify-content: center; 
+        align-items: center;
+        border: 2px solid #444;
+        margin-right: 10px;
+    }
+    .steering-wheel {
+        width: 60px; 
+        height: 60px;
+        border-radius: 50%;
+        border: 6px solid #888;
+        position: relative;
+        box-sizing: border-box;
+        transition: transform 0.05s linear; 
+    }
+    .steering-wheel::before {
+        content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 6px;
+        background: #888; transform: translateY(-50%);
+    }
+    .steering-wheel::after {
+        content: ''; position: absolute; top: 50%; left: 50%; width: 6px; height: 50%;
+        background: #888; transform: translateX(-50%);
+    }
+
+    .speed-container {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+    }
+    
+    .speed { 
+        font-size: 3rem; font-weight: bold; 
+        font-variant-numeric: tabular-nums; line-height: 1; color: #fff;
+    }
+    .unit { font-size: 1rem; color: #aaa; text-transform: uppercase; letter-spacing: 1px;}
+    
+    .gear {
+        font-size: 2rem; font-weight: bold; color: #4dabf7; background: #222;
+        padding: 10px 15px; border-radius: 8px;
+    }
+    .gear.reverse { color: #fa5252; }
+</style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div class="top-left-ui">
+        <div class="panel controls">
+            <h2>Controls</h2>
+            <p><span class="key">W</span> Accelerate</p>
+            <p><span class="key">S</span> Reverse / Brake</p>
+            <p><span class="key">A</span> <span class="key">D</span> Steer Left / Right</p>
+            <p><span class="key">Space</span> E-Brake</p>
+        </div>
+        
+        <div class="panel vehicle-selector">
+            <h2>Change Vehicle</h2>
+            <button id="btnCar" onclick="setVehicle('car')"><span class="key">1</span> Sports Car</button>
+            <button id="btnTruck" onclick="setVehicle('truck')"><span class="key">2</span> Semi-Truck</button>
+        </div>
+    </div>
+    
+    <div class="dashboard">
+        <div class="steering-container">
+            <div class="steering-wheel" id="steeringWheel"></div>
+        </div>
+        <div class="gear" id="gearDisplay">P</div>
+        <div class="speed-container">
+            <div class="speed" id="speedDisplay">0</div>
+            <div class="unit">km/h</div>
+        </div>
+    </div>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+// ==========================================
+// GAME SETUP & GLOBAL VARIABLES
+// ==========================================
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const speedDisplay = document.getElementById("speedDisplay");
+const gearDisplay = document.getElementById("gearDisplay");
+const steeringWheelDisplay = document.getElementById("steeringWheel");
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const keys = {};
+window.addEventListener("keydown", e => {
+    keys[e.key.toLowerCase()] = true;
+    if(e.code === 'Space') keys['space'] = true;
+    if(e.key === '1') setVehicle('car');
+    if(e.key === '2') setVehicle('truck');
+});
+window.addEventListener("keyup", e => {
+    keys[e.key.toLowerCase()] = false;
+    if(e.code === 'Space') keys['space'] = false;
+});
+
+const skidMarks = [];
+
+// ==========================================
+// PROCEDURAL CURVED ROAD SYSTEM
+// ==========================================
+
+function getCatmullRomPoints(points, numSegments) {
+    let result = [];
+    for (let i = 0; i < points.length; i++) {
+        let p0 = points[(i - 1 + points.length) % points.length];
+        let p1 = points[i];
+        let p2 = points[(i + 1) % points.length];
+        let p3 = points[(i + 2) % points.length];
+
+        for (let t = 0; t < 1; t += 1 / numSegments) {
+            let t2 = t * t;
+            let t3 = t2 * t;
+            let x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
+            let y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+            result.push({x, y});
+        }
+    }
+    return result;
+}
+
+function generateLaneWaypoints(points, offset) {
+    let lane = [];
+    for(let i = 0; i < points.length; i++) {
+        let prev = points[(i - 1 + points.length) % points.length];
+        let next = points[(i + 1) % points.length];
+        let dx = next.x - prev.x;
+        let dy = next.y - prev.y;
+        let len = Math.hypot(dx, dy);
+        let nx = -dy / len;
+        let ny = dx / len;
+        lane.push({ x: points[i].x + nx * offset, y: points[i].y + ny * offset });
+    }
+    return lane;
+}
+
+const baseTrackPoints = [
+    {x: 0, y: -2000}, {x: 2500, y: -2500}, {x: 4000, y: -500}, {x: 3500, y: 1500},
+    {x: 1000, y: 2500}, {x: -1500, y: 1500}, {x: -2500, y: -500}, {x: -1500, y: -1800}
+];
+
+const trackPoints = getCatmullRomPoints(baseTrackPoints, 20);
+const ROAD_WIDTH = 130; 
+const LANE_OFFSET = ROAD_WIDTH / 4; 
+const waypointsLane1 = generateLaneWaypoints(trackPoints, LANE_OFFSET); 
+const waypointsLane2 = generateLaneWaypoints(trackPoints, -LANE_OFFSET).reverse(); 
+
+// ==========================================
+// VEHICLE CONFIGURATIONS (Clean Dimensions)
+// ==========================================
+
+const CAR_CONFIG = {
+    type: 'car',
+    width: 80, height: 38, wheelbase: 50,
+    wheelWidth: 12, wheelHeight: 5,
+    maxSpeed: 16, maxReverseSpeed: -8, acceleration: 0.04,
+    brakingForce: 0.25, friction: 0.99, maxSteeringAngle: 0.8,
+    color: "#e03131", hasTrailer: false
+};
+
+const TRUCK_CONFIG = {
+    type: 'semi',
+    width: 70, height: 40, wheelbase: 45, // Shorter tractor cab
+    wheelWidth: 16, wheelHeight: 7,
+    maxSpeed: 10, maxReverseSpeed: -5, acceleration: 0.02,
+    brakingForce: 0.35, friction: 0.98, maxSteeringAngle: 0.6,
+    color: "#f59f00", hasTrailer: true,
+    hitchOffset: 20 // The fifth wheel is located over the rear axles
+};
+
+// ==========================================
+// VEHICLE CLASS (Player)
+// ==========================================
+class Vehicle {
+    constructor(x, y, config) {
+        this.x = x; 
+        this.y = y; 
+        this.heading = 0; 
+        
+        // Config Setup
+        this.type = config.type;
+        this.width = config.width; 
+        this.height = config.height;
+        this.wheelbase = config.wheelbase;
+        this.wheelW = config.wheelWidth;
+        this.wheelH = config.wheelHeight;
+        this.maxSpeed = config.maxSpeed;           
+        this.maxReverseSpeed = config.maxReverseSpeed;    
+        this.acceleration = config.acceleration;     
+        this.brakingForce = config.brakingForce;     
+        this.friction = config.friction;         
+        this.maxSteeringAngle = config.maxSteeringAngle;  
+        this.color = config.color;       
+        this.hasTrailer = config.hasTrailer;
+        this.hitchOffset = config.hitchOffset || 0;
+        
+        // Physics State
+        this.speed = 0; 
+        this.steeringAngle = 0;       
+        this.targetSteeringAngle = 0; 
+        this.isBraking = false;       
+
+        if(this.hasTrailer) {
+            this.trailer = new Trailer(this);
+        } else {
+            this.trailer = null;
+        }
+    }
+
+    update() {
+        this.isBraking = false;
+        if (keys['w']) {
+            this.speed += this.acceleration;
+        } else if (keys['s']) {
+            if (this.speed > 1) {
+                this.speed -= this.brakingForce;
+                this.isBraking = true; 
+            } else {
+                this.speed -= this.acceleration;
+            }
+        }
+
+        if (keys['space']) {
+            this.speed *= 0.90; 
+            this.isBraking = true;
+            if (Math.abs(this.speed) > 5) this.addSkidMark();
+        }
+
+        if (!keys['w'] && !keys['s'] && !keys['space']) {
+            this.speed *= this.friction;
+        }
+
+        if (this.speed > this.maxSpeed) this.speed = this.maxSpeed;
+        if (this.speed < this.maxReverseSpeed) this.speed = this.maxReverseSpeed;
+        if (Math.abs(this.speed) < 0.1 && !keys['w'] && !keys['s']) this.speed = 0;
+
+        let speedFactor = Math.abs(this.speed) / this.maxSpeed; 
+        let currentMaxSteer = this.maxSteeringAngle * (1 - (speedFactor * 0.6));
+
+        this.targetSteeringAngle = 0; 
+        if (keys['a']) this.targetSteeringAngle = -currentMaxSteer;
+        if (keys['d']) this.targetSteeringAngle = currentMaxSteer;
+
+        let steerDiff = this.targetSteeringAngle - this.steeringAngle;
+        this.steeringAngle += steerDiff * 0.1;
+
+        const frontX = this.x + Math.cos(this.heading) * (this.wheelbase / 2);
+        const frontY = this.y + Math.sin(this.heading) * (this.wheelbase / 2);
+        const rearX = this.x - Math.cos(this.heading) * (this.wheelbase / 2);
+        const rearY = this.y - Math.sin(this.heading) * (this.wheelbase / 2);
+
+        const newRearX = rearX + this.speed * Math.cos(this.heading);
+        const newRearY = rearY + this.speed * Math.sin(this.heading);
+        const newFrontX = frontX + this.speed * Math.cos(this.heading + this.steeringAngle);
+        const newFrontY = frontY + this.speed * Math.sin(this.heading + this.steeringAngle);
+
+        this.x = (newFrontX + newRearX) / 2;
+        this.y = (newFrontY + newRearY) / 2;
+        this.heading = Math.atan2(newFrontY - newRearY, newFrontX - newRearX);
+
+        if (this.trailer) this.trailer.update();
+        this.updateUI();
+    }
+
+    addSkidMark() {
+        const rearX = this.x - Math.cos(this.heading) * (this.wheelbase / 2);
+        const rearY = this.y - Math.sin(this.heading) * (this.wheelbase / 2);
+        const perpX = Math.cos(this.heading + Math.PI/2) * (this.height/2 - 2);
+        const perpY = Math.sin(this.heading + Math.PI/2) * (this.height/2 - 2);
+        
+        skidMarks.push({
+            x1: rearX + perpX, y1: rearY + perpY, 
+            x2: rearX - perpX, y2: rearY - perpY, 
+            alpha: 0.5 
+        });
+        if(skidMarks.length > 300) skidMarks.shift();
+    }
+
+    updateUI() {
+        const displaySpeed = Math.abs(Math.round(this.speed * 4.5)); 
+        speedDisplay.innerText = displaySpeed;
+
+        if (this.speed < -0.5) {
+            gearDisplay.innerText = "R";
+            gearDisplay.className = "gear reverse"; 
+        } else if (this.speed > 0.5) {
+            gearDisplay.innerText = "D";
+            gearDisplay.className = "gear";
+        } else {
+            gearDisplay.innerText = "P";
+            gearDisplay.className = "gear";
+        }
+
+        const wheelRotationDegrees = (this.steeringAngle * 2.5) * (180 / Math.PI);
+        steeringWheelDisplay.style.transform = `rotate(${wheelRotationDegrees}deg)`;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.heading);
+
+        // Headlights
+        ctx.fillStyle = "rgba(255, 255, 200, 0.15)";
+        ctx.beginPath();
+        ctx.moveTo(this.width / 2, -this.height / 2 + 5);
+        ctx.lineTo(this.width / 2 + 400, -this.height * 2.5);
+        ctx.lineTo(this.width / 2 + 400, this.height * 2.5);
+        ctx.lineTo(this.width / 2, this.height / 2 - 5);
+        ctx.fill();
+
+        // Drop Shadow
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
+        ctx.fillRect(-this.width / 2 + 5, -this.height / 2 + 5, this.width, this.height);
+        
+        // Clean Frame Synthesis Style Main Body
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.roundRect(-this.width / 2, -this.height / 2, this.width, this.height, 6);
+        ctx.fill();
+
+        // Visual details based on vehicle type
+        if (this.type === 'car') {
+            // Car Windows
+            ctx.fillStyle = "#111"; 
+            ctx.beginPath();
+            ctx.roundRect(-this.width / 4 - 5, -this.height / 2 + 3, this.width / 2 + 10, this.height - 6, 4);
+            ctx.fill();
+            // Roof
+            ctx.fillStyle = this.color;
+            ctx.fillRect(-this.width / 4, -this.height / 2 + 5, this.width / 2, this.height - 10);
+        } else if (this.type === 'semi') {
+            // Truck Cab
+            ctx.fillStyle = "#111"; 
+            ctx.beginPath();
+            ctx.roundRect(this.width / 4 - 5, -this.height / 2 + 2, 20, this.height - 4, 2);
+            ctx.fill();
+            // Truck Roof
+            ctx.fillStyle = this.color;
+            ctx.fillRect(this.width / 4 - 2, -this.height / 2 + 4, 14, this.height - 8);
+            
+            // Draw Fifth Wheel (Hitch point)
+            ctx.fillStyle = "#333";
+            ctx.beginPath();
+            ctx.arc(-this.hitchOffset, 0, 8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Brake Lights
+        if (this.isBraking || (keys['s'] && this.speed > 0)) {
+            ctx.fillStyle = "#ff0000"; ctx.shadowColor = "red"; ctx.shadowBlur = 10; 
+        } else {
+            ctx.fillStyle = "#550000"; ctx.shadowBlur = 0;
+        }
+        ctx.fillRect(-this.width / 2, -this.height / 2 + 2, 4, 8); 
+        ctx.fillRect(-this.width / 2, this.height / 2 - 10, 4, 8); 
+        ctx.shadowBlur = 0; 
+
+        // --- FRAME SYNTHESIS CLEAN WHEELS ---
+        // Just simple rectangles that rotate perfectly from their center
+        const wX = this.wheelbase / 2;
+        const wY = this.height / 2;
+        
+        const drawWheel = (x, y, isFront) => {
+            ctx.save(); 
+            ctx.translate(x, y); 
+            if (isFront) ctx.rotate(this.steeringAngle); 
+            ctx.fillStyle = "#1a1a1a"; // Dark rubber
+            // Draw wheel centered perfectly on the pivot point
+            ctx.fillRect(-this.wheelW/2, -this.wheelH/2, this.wheelW, this.wheelH);
+            ctx.restore();
+        };
+
+        drawWheel(wX, -wY, true);   
+        drawWheel(wX, wY, true);    
+        drawWheel(-wX, -wY, false); 
+        drawWheel(-wX, wY, false);  
+        
+        // Semi trucks often have dual rear axles
+        if(this.type === 'semi') {
+            drawWheel(-wX + 15, -wY, false); 
+            drawWheel(-wX + 15, wY, false); 
+        }
+
+        ctx.restore();
+    }
+}
+
+// ==========================================
+// SEMI-TRAILER CLASS (True Articulated Pivot)
+// ==========================================
+class Trailer {
+    constructor(car) {
+        this.car = car; 
+        this.width = 170; // Long trailer
+        this.height = 44; // Slightly wider than the cab
+        
+        // Fifth Wheel Physics
+        this.kingpinOffset = 65; // Distance from trailer center to the pin that connects to the truck
+        this.axleOffset = -60;   // Distance from trailer center to its rear wheels
+        
+        // Spawn attached correctly
+        const hitchX = this.car.x - Math.cos(this.car.heading) * this.car.hitchOffset;
+        const hitchY = this.car.y - Math.sin(this.car.heading) * this.car.hitchOffset;
+        
+        this.heading = car.heading;
+        this.x = hitchX - Math.cos(this.heading) * this.kingpinOffset;
+        this.y = hitchY - Math.sin(this.heading) * this.kingpinOffset;
+    }
+
+    update() {
+        // Calculate where the truck's fifth wheel is globally
+        const hitchX = this.car.x - Math.cos(this.car.heading) * this.car.hitchOffset;
+        const hitchY = this.car.y - Math.sin(this.car.heading) * this.car.hitchOffset;
+        
+        // Point the trailer kingpin toward the hitch
+        const dx = hitchX - this.x;
+        const dy = hitchY - this.y;
+        this.heading = Math.atan2(dy, dx);
+        
+        // Enforce rigid connection
+        this.x = hitchX - Math.cos(this.heading) * this.kingpinOffset;
+        this.y = hitchY - Math.sin(this.heading) * this.kingpinOffset;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.heading);
+
+        // Shadow
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
+        ctx.fillRect(-this.width / 2 + 5, -this.height / 2 + 5, this.width, this.height);
+        
+        // Massive Cargo Body (Overlaps the truck's rear slightly)
+        ctx.fillStyle = "#e6edf2"; // White/Silver trailer
+        ctx.beginPath();
+        ctx.roundRect(-this.width / 2, -this.height / 2, this.width, this.height, 2);
+        ctx.fill();
+        
+        // Subtle panel lines
+        ctx.strokeStyle = "#ccc";
+        ctx.lineWidth = 1;
+        for(let i = -this.width/2 + 10; i < this.width/2 - 10; i+= 20) {
+            ctx.beginPath(); ctx.moveTo(i, -this.height/2 + 1); ctx.lineTo(i, this.height/2 - 1); ctx.stroke();
+        }
+
+        // Trailer Dual Tires near the back
+        ctx.fillStyle = "#1a1a1a";
+        const wW = 16, wH = 7;
+        const axleX = this.axleOffset;
+        const axleY = this.height/2;
+        
+        // Rear axle 1
+        ctx.fillRect(axleX - wW/2, -axleY - wH/2, wW, wH); 
+        ctx.fillRect(axleX - wW/2, axleY - wH/2, wW, wH); 
+        // Rear axle 2
+        ctx.fillRect(axleX + 16 - wW/2, -axleY - wH/2, wW, wH); 
+        ctx.fillRect(axleX + 16 - wW/2, axleY - wH/2, wW, wH); 
+
+        ctx.restore();
+    }
+}
+
+// ==========================================
+// AI TRAFFIC CLASS
+// ==========================================
+class TrafficCar {
+    constructor(path, color, startWaypointIndex, speedOffset) {
+        this.path = path;
+        this.targetIndex = startWaypointIndex;
+        this.x = path[startWaypointIndex].x;
+        this.y = path[startWaypointIndex].y;
+        this.heading = 0;
+        
+        this.width = 80; 
+        this.height = 36;
+        this.color = color;
+        this.baseSpeed = 10 + speedOffset; 
+        this.speed = this.baseSpeed;
+        this.turnSpeed = 0.08; 
+    }
+
+    update() {
+        const target = this.path[this.targetIndex];
+        const dx = target.x - this.x;
+        const dy = target.y - this.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < 150) {
+            this.targetIndex = (this.targetIndex + 1) % this.path.length;
+        }
+
+        const targetAngle = Math.atan2(dy, dx);
+        let angleDiff = targetAngle - this.heading;
+        
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+        this.heading += angleDiff * this.turnSpeed;
+        this.x += Math.cos(this.heading) * this.speed;
+        this.y += Math.sin(this.heading) * this.speed;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.heading);
+
+        // Simple slick drawing like Frame Synthesis
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
+        ctx.fillRect(-this.width / 2 + 5, -this.height / 2 + 5, this.width, this.height);
+        
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.roundRect(-this.width / 2, -this.height / 2, this.width, this.height, 4);
+        ctx.fill();
+        
+        ctx.fillStyle = "#111"; 
+        ctx.beginPath();
+        ctx.roundRect(-this.width / 4, -this.height / 2 + 2, this.width / 2 + 5, this.height - 4, 2);
+        ctx.fill();
+        ctx.fillStyle = this.color;
+        ctx.fillRect(-this.width / 4 + 10, -this.height / 2 + 3, this.width / 2 - 10, this.height - 6);
+        
+        // Simple wheels
+        ctx.fillStyle = "#1a1a1a";
+        const wX = this.width/2 - 15, wY = this.height/2;
+        ctx.fillRect(wX - 6, -wY - 2, 12, 4);
+        ctx.fillRect(wX - 6, wY - 2, 12, 4);
+        ctx.fillRect(-wX - 6, -wY - 2, 12, 4);
+        ctx.fillRect(-wX - 6, wY - 2, 12, 4);
+
+        ctx.restore();
+    }
+}
+
+// ==========================================
+// ENVIRONMENT & BUILDINGS
+// ==========================================
+const buildings = [
+    { x: 1000, y: 500, w: 600, h: 400, color: "#495057" }, 
+    { x: 500, y: -800, w: 400, h: 800, color: "#343a40" },
+    { x: -200, y: 400, w: 800, h: 500, color: "#868e96" },
+    { x: -3800, y: -100, w: 300, h: 600, color: "#2b8a3e" }, 
+];
+
+// ==========================================
+// CAMERA SYSTEM
+// ==========================================
+let camX = 0, camY = 0;
+
+function updateCamera(target) {
+    const lookAheadDistance = target.speed * 15;
+    const targetCamX = target.x + Math.cos(target.heading) * lookAheadDistance;
+    const targetCamY = target.y + Math.sin(target.heading) * lookAheadDistance;
+
+    camX += (targetCamX - camX - canvas.width / 2) * 0.05;
+    camY += (targetCamY - camY - canvas.height / 2) * 0.05;
+}
+
+// ==========================================
+// RENDER ENVIRONMENT
+// ==========================================
+function drawWorldEnvironment(ctx) {
+    ctx.fillStyle = "#3b5b2d"; 
+    ctx.fillRect(-6000, -6000, 15000, 15000); 
+
+    ctx.beginPath();
+    ctx.moveTo(trackPoints[0].x, trackPoints[0].y);
+    for(let i = 1; i < trackPoints.length; i++) ctx.lineTo(trackPoints[i].x, trackPoints[i].y);
+    ctx.closePath();
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+
+    ctx.lineWidth = ROAD_WIDTH + 14; 
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.stroke();
+
+    ctx.lineWidth = ROAD_WIDTH;
+    ctx.strokeStyle = "#2b2b2b";
+    ctx.stroke();
+
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#fab005";
+    ctx.setLineDash([30, 40]); 
+    ctx.stroke();
+    ctx.setLineDash([]); 
+
+    for (let b of buildings) {
+        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(b.x + 15, b.y + 15, b.w, b.h); 
+        ctx.fillStyle = b.color; ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 6); ctx.fill(); 
+        ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fillRect(b.x, b.y, b.w, 20); 
+    }
+}
+
+// ==========================================
+// INITIALIZATION & GAME LOOP
+// ==========================================
+
+let player;
+const startPoint = waypointsLane1[0];
+const nextStartPoint = waypointsLane1[1];
+const startHeading = Math.atan2(nextStartPoint.y - startPoint.y, nextStartPoint.x - startPoint.x);
+
+function setVehicle(type) {
+    const oldX = player ? player.x : startPoint.x;
+    const oldY = player ? player.y : startPoint.y;
+    const oldHeading = player ? player.heading : startHeading;
+    const oldSpeed = player ? player.speed : 0;
+
+    if(type === 'car') {
+        player = new Vehicle(oldX, oldY, CAR_CONFIG);
+        document.getElementById('btnCar').classList.add('active');
+        document.getElementById('btnTruck').classList.remove('active');
+    } else {
+        player = new Vehicle(oldX, oldY, TRUCK_CONFIG);
+        document.getElementById('btnTruck').classList.add('active');
+        document.getElementById('btnCar').classList.remove('active');
+    }
+    
+    player.heading = oldHeading;
+    player.speed = oldSpeed;
+}
+
+setVehicle('car');
+
+const traffic = [
+    new TrafficCar(waypointsLane1, "#fcc419", 10, 0),    
+    new TrafficCar(waypointsLane1, "#20c997", 40, 2),    
+    new TrafficCar(waypointsLane2, "#ae3ec9", 20, -1),   
+    new TrafficCar(waypointsLane2, "#ff922b", 50, 1)     
+];
+
+function loop() {
+    // --- UPDATE ---
+    player.update();
+    for (let bot of traffic) bot.update();
+    updateCamera(player);
+
+    // --- CLEAR ---
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // --- DRAW WORLD ---
+    ctx.save();
+    ctx.translate(-camX, -camY); 
+
+    drawWorldEnvironment(ctx);
+
+    // Skidmarks
+    ctx.strokeStyle = "rgba(10, 10, 10, 0.4)";
+    ctx.lineWidth = 6;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    for (let i = 0; i < skidMarks.length; i++) {
+        const m = skidMarks[i];
+        m.alpha -= 0.002; 
+        if(m.alpha <= 0) continue;
+        ctx.moveTo(m.x1, m.y1); ctx.lineTo(m.x1 + 1, m.y1 + 1); 
+        ctx.moveTo(m.x2, m.y2); ctx.lineTo(m.x2 + 1, m.y2 + 1); 
+    }
+    ctx.stroke();
+    while(skidMarks.length > 0 && skidMarks[0].alpha <= 0) skidMarks.shift();
+
+    for (let bot of traffic) bot.draw(ctx);
+
+    // Render Trailer first, then Truck over it (crucial for semi-trucks)
+    if(player.trailer) player.trailer.draw(ctx);
+    player.draw(ctx);
+
+    ctx.restore(); 
+    requestAnimationFrame(loop);
+}
+
+// Start Game
+loop();
+</script>
+</body>
+</html>
